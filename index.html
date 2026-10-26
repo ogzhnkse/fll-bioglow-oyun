@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FLL BIOGLOW 3D</title>
+<style>
+  :root { --panel: rgba(20, 24, 30, 0.84); --yazi: #eef1f4; --soluk: #9aa4af; --vurgu: #7ed957; --zemin: #2b3138;
+          --ust: env(safe-area-inset-top, 0px); --sol: env(safe-area-inset-left, 0px);
+          --sag: env(safe-area-inset-right, 0px); --alt: env(safe-area-inset-bottom, 0px); color-scheme: dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--zemin); color: var(--yazi);
+               font: 14px/1.4 -apple-system, "Segoe UI", sans-serif; }
+  canvas { display: block; }
+  .kutu { position: absolute; background: var(--panel); border-radius: 8px; padding: 10px 14px; }
+  #gorevler { top: calc(12px + var(--ust)); left: calc(12px + var(--sol)); max-height: calc(100% - 110px); overflow-y: auto; width: 250px; padding: 8px; }
+  #gorevler h3 { margin: 4px 6px 8px; font-size: 13px; color: var(--soluk); font-weight: 600; letter-spacing: .04em; }
+  #gorevler button.g { display: block; width: 100%; text-align: left; background: transparent; color: var(--yazi);
+                       border: 0; border-radius: 6px; padding: 5px 8px; font: inherit; cursor: pointer; }
+  #gorevler button.g:hover { background: #3a424c; }
+  #gorevler button.g.secili { background: var(--vurgu); color: #17210f; }
+  #gorevler button.g b { display: inline-block; width: 28px; font-variant-numeric: tabular-nums; }
+  .mafsal { padding: 4px 8px 8px 36px; }
+  .mafsal label { display: block; color: var(--soluk); font-size: 12px; }
+  .mafsal input { width: 100%; }
+  .mafsal .sifirla { background: #3a424c; color: var(--yazi); border: 0; border-radius: 5px; padding: 2px 8px;
+                     font: 12px inherit; cursor: pointer; margin-top: 2px; }
+  #kamera { top: calc(12px + var(--ust)); right: calc(12px + var(--sag)); display: flex; gap: 6px; padding: 6px; }
+  #kamera button, #dok select { background: #3a424c; color: var(--yazi); border: 0; border-radius: 6px;
+                                padding: 6px 10px; font: inherit; cursor: pointer; }
+  #kamera button.secili { background: var(--vurgu); color: #17210f; }
+  #dok { top: calc(62px + var(--ust)); right: calc(12px + var(--sag)); display: grid; grid-template-columns: auto auto; gap: 6px 10px; align-items: center; }
+  #dok span { color: var(--soluk); font-size: 12.5px; }
+  #yardim { bottom: calc(12px + var(--alt)); left: calc(12px + var(--sol)); color: var(--soluk); font-size: 12.5px; }
+  #yardim kbd { background: #3a424c; color: var(--yazi); border-radius: 4px; padding: 0 5px; font: inherit; }
+  #yukleniyor { top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 16px; }
+  .etiket { position: absolute; transform: translate(-50%, -100%); background: #c8102e; color: #fff;
+            font: 700 13px/1 -apple-system, sans-serif; padding: 4px 6px; border-radius: 5px; pointer-events: none;
+            white-space: nowrap; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--vurgu); outline-offset: 2px; }
+  @media (max-width: 720px) {
+    #gorevler { width: 170px; max-height: 45%; font-size: 12.5px; }
+    #yardim { display: none; }
+    #kamera button { padding: 5px 7px; font-size: 12.5px; }
+    #dok { top: calc(56px + var(--ust)); font-size: 12px; }
+    #dok span { display: none; }
+  }
+  body.onizleme .kutu, body.onizleme .etiket { display: none !important; }
+</style>
+</head>
+<body>
+<div id="yukleniyor" class="kutu">Yükleniyor…</div>
+<div id="gorevler" class="kutu"><h3>GÖREVLER</h3></div>
+<div id="kamera" class="kutu">
+  <button data-k="ust">1 Üstten</button>
+  <button data-k="genel">2 Genel</button>
+  <button data-k="serbest">3 Serbest</button>
+  <button id="etiketBtn" class="secili">E Etiketler</button>
+</div>
+<div id="dok" class="kutu"></div>
+<div id="yardim" class="kutu">
+  Fare: sol sürükle döndür · sağ sürükle kaydır · tekerlek yakınlaş &nbsp;
+  Görev seç → kaydırıcılarla hareketli parçaları dene &nbsp; <kbd>Esc</kbd> seçimi kaldır &nbsp; <kbd>T</kbd> sahayı sıfırla
+</div>
+
+<script>
+// yukleme sirasinda bir hata olursa ekranda gosterilir
+function hataGoster(mesaj) {
+  const k = document.getElementById("yukleniyor");
+  if (k) { k.style.background = "#8c1d18"; k.textContent = "Oyun açılamadı: " + mesaj; }
+}
+addEventListener("error", e => hataGoster(e.message || "bir dosya yüklenemedi"));
+addEventListener("unhandledrejection", e => hataGoster(String(e.reason && e.reason.message || e.reason)));
+</script>
+<script type="module">
+// import map yerine jsDelivr +esm: OrbitControls ayni three modulunu kullanir
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/+esm";
+import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js/+esm";
+
+// ---- saha (mm). Masa koordinati: ic sol alt kose orijin, x saga, y yukari (mat uzerinde).
+// Three: X = x, Z = -y, Y yukari. Mat masanin altina dayali, sagda ve solda MAT_X0 kadar bosluk var.
+const prm = new URLSearchParams(location.search);
+const ONIZLEME = prm.get("model");             // ?model=m01 : tek modeli bos zeminde goster (kontrol icin)
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const sahne = new THREE.Scene();
+sahne.background = new THREE.Color(0x2b3138);
+const kamera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 5, 20000);
+const kontrol = new OrbitControls(kamera, renderer.domElement);
+kontrol.enableDamping = true;
+
+// model verisi: .bin dosyasi ya da (claude.ai yayininda) ayni verinin base64 metni (.b64.txt)
+async function ikili(url) {
+  const yanit = await fetch(url);
+  if (!yanit.ok) throw new Error(`${url} (${yanit.status})`);
+  if (!url.endsWith(".txt")) return yanit.arrayBuffer();
+  const ikiliMetin = atob((await yanit.text()).trim());
+  const bayt = new Uint8Array(ikiliMetin.length);
+  for (let i = 0; i < bayt.length; i++) bayt[i] = ikiliMetin.charCodeAt(i);
+  return bayt.buffer;
+}
+const bilgi = JSON.parse(new TextDecoder().decode(await ikili("veri/modeller.json")));
+const G = bilgi.gorevler;
+const MASA_W = G.masa_mm[0], MASA_H = G.masa_mm[1], MAT_W = G.mat_mm[0], MAT_X0 = G.mat_x0;
+const DUVAR_H = 70, DUVAR_K = 20;
+
+sahne.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.5));
+const gunes = new THREE.DirectionalLight(0xffffff, 2.1);
+gunes.position.set(MASA_W * 0.35, 2600, 900);
+gunes.target.position.set(MASA_W / 2, 0, -MASA_H / 2);
+gunes.castShadow = true;
+gunes.shadow.mapSize.set(4096, 4096);
+Object.assign(gunes.shadow.camera, { left: -1500, right: 1500, top: 1100, bottom: -1100, near: 100, far: 6000 });
+gunes.shadow.bias = -0.0004;
+sahne.add(gunes, gunes.target);
+
+// ---- masa, mat, duvarlar
+if (!ONIZLEME) {
+  const matDoku = new THREE.TextureLoader().load("mat_bioglow.png");
+  matDoku.colorSpace = THREE.SRGBColorSpace;
+  matDoku.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const mat = new THREE.Mesh(new THREE.PlaneGeometry(MAT_W, MASA_H),
+                             new THREE.MeshStandardMaterial({ map: matDoku, roughness: 0.9 }));
+  mat.rotation.x = -Math.PI / 2;
+  mat.position.set(MAT_X0 + MAT_W / 2, 0.5, -MASA_H / 2);
+  mat.receiveShadow = true;
+  sahne.add(mat);
+}
+const masa = new THREE.Mesh(new THREE.BoxGeometry(MASA_W + 600, 40, MASA_H + 600),
+                            new THREE.MeshStandardMaterial({ color: ONIZLEME ? 0xd9dde2 : 0x1d1f22, roughness: 0.85 }));
+masa.position.set(MASA_W / 2, -20, -MASA_H / 2);
+masa.receiveShadow = true;
+sahne.add(masa);
+if (!ONIZLEME) {
+  const duvarMat = new THREE.MeshStandardMaterial({ color: 0x18191b, roughness: 0.7 });
+  const duvar = (w, d, x, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, DUVAR_H, d), duvarMat);
+    m.position.set(x, DUVAR_H / 2, z);
+    m.castShadow = m.receiveShadow = true;
+    sahne.add(m);
+  };
+  duvar(MASA_W + 2 * DUVAR_K, DUVAR_K, MASA_W / 2, DUVAR_K / 2);
+  duvar(MASA_W + 2 * DUVAR_K, DUVAR_K, MASA_W / 2, -MASA_H - DUVAR_K / 2);
+  duvar(DUVAR_K, MASA_H, -DUVAR_K / 2, -MASA_H / 2);
+  duvar(DUVAR_K, MASA_H, MASA_W + DUVAR_K / 2, -MASA_H / 2);
+}
+
+// ---- modeller (tools/web_export.py ciktisi)
+const yukleniyor = document.getElementById("yukleniyor");
+const geometriler = {};
+const gerekli = Object.keys(bilgi.parcalar).filter(a => !ONIZLEME || a.startsWith(ONIZLEME + "__"));
+let yuklenen = 0;
+await Promise.all(gerekli.map(async ad => {
+  const m = bilgi.parcalar[ad];
+  const ham = new Int16Array(await ikili("veri/" + m.dosya));
+  const konum = new Float32Array(ham.length);
+  for (let i = 0; i < ham.length; i++) konum[i] = ham[i] / 10;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(konum, 3));
+  g.computeVertexNormals();
+  const malzemeler = m.gruplar.map((gr, i) => {
+    g.addGroup(gr.ilk * 3, gr.adet * 3, i);
+    return new THREE.MeshStandardMaterial({ color: gr.rgb, roughness: 0.45, side: THREE.DoubleSide,
+                                            transparent: !!gr.seffaf, opacity: gr.seffaf ? 0.55 : 1 });
+  });
+  geometriler[ad] = { g, malzemeler };
+  yukleniyor.textContent = `Yükleniyor… ${++yuklenen}/${gerekli.length}`;
+}));
+yukleniyor.remove();
+
+function ornek(ad) {
+  const { g, malzemeler } = geometriler[ad];
+  const m = new THREE.Mesh(g, malzemeler);
+  m.castShadow = m.receiveShadow = true;
+  return m;
+}
+const yQuat = aci => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -THREE.MathUtils.degToRad(aci));
+
+// ---- gorevleri kur. Her gorev: kok (mat uzerindeki yeri ve yonu) + gruplar.
+// Mafsalli grup bir pivot nesnesine baglanir; pivot mafsal noktasinda durur, mesh -nokta kadar kaydirilir.
+const kokler = {};          // yerlesim adi -> { kok, pivotlar: {grup: {pivot, mafsal, deger}} }
+function gorevKur(yer) {
+  const md = G.modeller[yer.model];
+  const kok = new THREE.Group();
+  kok.position.set(ONIZLEME ? MASA_W / 2 : MAT_X0 + yer.x, 0, ONIZLEME ? -MASA_H / 2 : -yer.y);
+  kok.quaternion.copy(yQuat(ONIZLEME ? 0 : yer.aci));
+  sahne.add(kok);
+  const pivotlar = {}, nesneler = { govde: kok };
+  const mafsallar = Object.fromEntries(md.mafsallar.map(m => [m.grup, m]));
+  // ust grubu once kurulmali: bagimlilik sirasina gore
+  const sira = [], ziyaret = new Set();
+  const ekle = g => {
+    if (ziyaret.has(g)) return;
+    ziyaret.add(g);
+    if (mafsallar[g] && mafsallar[g].ust !== "govde") ekle(mafsallar[g].ust);
+    sira.push(g);
+  };
+  Object.keys(md.gruplar).forEach(ekle);
+  for (const grup of sira) {
+    const parcaAdi = `${yer.model}__${grup}`;
+    const mf = mafsallar[grup];
+    let ebeveyn = kok, kayma = new THREE.Vector3();
+    if (mf) {
+      const ust = pivotlar[mf.ust];
+      const pivot = new THREE.Group();
+      const n = new THREE.Vector3(...mf.nokta_mm);
+      const ustNokta = ust ? new THREE.Vector3(...ust.mafsal.nokta_mm) : new THREE.Vector3();
+      pivot.position.copy(n).sub(ustNokta);
+      (ust ? ust.pivot : kok).add(pivot);
+      pivotlar[grup] = { pivot, mafsal: mf, deger: 0 };
+      ebeveyn = pivot;
+      kayma = n.clone().negate();
+    } else if (grup !== "govde") {
+      kayma = new THREE.Vector3();
+    }
+    if (geometriler[parcaAdi]) {
+      const mesh = ornek(parcaAdi);
+      mesh.position.copy(kayma);
+      ebeveyn.add(mesh);
+      nesneler[grup] = mesh;
+    }
+  }
+  kokler[yer.ad] = { kok, pivotlar, yer };
+  return kokler[yer.ad];
+}
+function hareketEt(p, deger) {
+  const mf = p.mafsal;
+  p.deger = deger;
+  const yon = new THREE.Vector3(...(mf.yon || [0, 1, 0])).normalize();
+  if (mf.tur === "mentese") {
+    p.pivot.quaternion.setFromAxisAngle(yon, THREE.MathUtils.degToRad(deger));
+  } else if (mf.tur === "kizak") {
+    if (!p.taban) p.taban = p.pivot.position.clone();
+    p.pivot.position.copy(p.taban).addScaledVector(yon, deger * 0.4);
+  } else if (mf.tur === "serbest") {
+    if (!p.taban) p.taban = p.pivot.position.clone();
+    p.pivot.position.copy(p.taban).add(new THREE.Vector3(0, deger * 0.4, 0));
+  }
+}
+
+// ---- bagli hareketler
+// kalkis (gorev 01): surucu (taban) kayinca iki kablo cifti pimlerinde katlanir, orta (drone) havalanir.
+// Kablolar X-Y duzleminde doner; orta nokta iki cemberin kesisimidir.
+function kisitlariUygula(k) {
+  const md = G.modeller[k.yer.model];
+  for (const ks of md.kisitlar || []) {
+    if (ks.tur !== "kalkis") continue;
+    const P = k.pivotlar, sur = P[ks.surucu], sol = P[ks.sol], sag = P[ks.sag], orta = P[ks.orta];
+    const A0 = new THREE.Vector3(...sol.mafsal.nokta_mm), C = new THREE.Vector3(...sag.mafsal.nokta_mm);
+    const D0 = new THREE.Vector3(...orta.mafsal.nokta_mm);
+    const A = A0.clone().addScaledVector(new THREE.Vector3(...sur.mafsal.yon), sur.deger * 0.4);
+    const L1 = Math.hypot(D0.x - A0.x, D0.y - A0.y), L2 = Math.hypot(D0.x - C.x, D0.y - C.y);
+    const dx = C.x - A.x, dy = C.y - A.y, d = Math.hypot(dx, dy);
+    if (d > L1 + L2 || d < Math.abs(L1 - L2)) continue;
+    const a = (L1 * L1 - L2 * L2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+    const mx = A.x + a * dx / d, my = A.y + a * dy / d;
+    const D = new THREE.Vector3(mx - h * dy / d, my + h * dx / d, D0.z);
+    if (D.y < mx + h * dy / d - 1e9) D.set(mx + h * dy / d, my - h * dx / d, D0.z);
+    const ac = (u, v) => Math.atan2(u.y - v.y, u.x - v.x);
+    const z = new THREE.Vector3(0, 0, 1);
+    sol.pivot.position.copy(A);
+    sol.pivot.quaternion.setFromAxisAngle(z, ac(D, A) - ac(D0, A0));
+    sag.pivot.quaternion.setFromAxisAngle(z, ac(D, C) - ac(D0, C));
+    orta.pivot.position.copy(D);
+  }
+}
+
+const yerlesim = ONIZLEME ? [{ ad: ONIZLEME, model: ONIZLEME, x: 0, y: 0, aci: 0 }] : aktifYerlesim();
+function aktifYerlesim() {
+  const dok = G.dok_secimi;
+  const out = [];
+  for (const y of G.yerlesim) {
+    if (y.dok) {                 // degistirilebilir model: secili doka gore
+      const d = G.doklar[dok[y.model]];
+      out.push({ ...y, x: d.x, y: d.y, aci: d.aci + (y.aci || 0) });
+    } else out.push(y);
+  }
+  return out;
+}
+yerlesim.forEach(gorevKur);
+
+// ---- onizleme: kamerayi modele oturt, istenirse mafsallari ayarla (?m=grup:deger,grup:deger)
+if (ONIZLEME) {
+  document.body.classList.add("onizleme");
+  const k = kokler[ONIZLEME];
+  for (const s of (prm.get("m") || "").split(",").filter(Boolean)) {
+    const [g, d] = s.split(":");
+    if (k.pivotlar[g]) hareketEt(k.pivotlar[g], +d);
+  }
+  kisitlariUygula(k);
+  // hx, hy, hz: hedef noktasi (model koordinati, mm; hz matta yukari +), r: uzaklik mm
+  const kutu = new THREE.Box3().setFromObject(k.kok);
+  const merkez = kutu.getCenter(new THREE.Vector3()), boy = kutu.getSize(new THREE.Vector3()).length();
+  if (prm.has("hx")) merkez.set(MASA_W / 2 + +prm.get("hx"), +(prm.get("hy") || 0), -MASA_H / 2 - +(prm.get("hz") || 0));
+  const aci = THREE.MathUtils.degToRad(+(prm.get("aci") ?? 35)), yuk = THREE.MathUtils.degToRad(+(prm.get("yuk") ?? 30));
+  const r = +(prm.get("r") || boy * 1.25);
+  kamera.position.set(merkez.x + r * Math.sin(aci) * Math.cos(yuk), merkez.y + r * Math.sin(yuk),
+                      merkez.z + r * Math.cos(aci) * Math.cos(yuk));
+  kontrol.target.copy(merkez);
+  kontrol.update();
+  renderer.render(sahne, kamera);
+  document.title = "hazir";
+}
+
+// ---- gorev listesi ve mafsal kaydiricilari
+const liste = document.getElementById("gorevler");
+let secili = null;
+function listeKur() {
+  liste.querySelectorAll(".g, .mafsal").forEach(e => e.remove());
+  for (const y of yerlesim) {
+    const md = G.modeller[y.model];
+    const b = document.createElement("button");
+    b.className = "g" + (secili === y.ad ? " secili" : "");
+    b.innerHTML = `<b>${md.no}</b>${md.baslik}`;
+    b.onclick = () => { secili = secili === y.ad ? null : y.ad; listeKur(); if (secili) odakla(y.ad); };
+    liste.appendChild(b);
+    if (secili !== y.ad) continue;
+    for (const [grup, p] of Object.entries(kokler[y.ad].pivotlar)) {
+      if (p.mafsal.tur === "bagli") continue;
+      const mf = p.mafsal, d = document.createElement("div");
+      d.className = "mafsal";
+      const [a, z] = mf.aralik || [-90, 90];
+      d.innerHTML = `<label>${mf.not || grup} <span></span></label><input type="range" min="${a}" max="${z}" step="1" value="${p.deger}">`;
+      const inp = d.querySelector("input"), sp = d.querySelector("span");
+      const birim = mf.tur === "mentese" ? "°" : " LDU";
+      sp.textContent = p.deger + birim;
+      inp.oninput = () => { hareketEt(p, +inp.value); kisitlariUygula(kokler[y.ad]); sp.textContent = inp.value + birim; };
+      liste.appendChild(d);
+    }
+  }
+}
+function odakla(ad) {
+  const kutu = new THREE.Box3().setFromObject(kokler[ad].kok);
+  const m = kutu.getCenter(new THREE.Vector3()), r = Math.max(300, kutu.getSize(new THREE.Vector3()).length() * 1.6);
+  kontrol.target.copy(m);
+  kamera.position.set(m.x + r * 0.35, m.y + r * 0.75, m.z + r * 0.75);
+  kameraModu = "serbest"; butonlar();
+}
+if (!ONIZLEME) listeKur();
+
+// ---- dok secimi (gorev 13-15 degistirilebilir modeller)
+const dokKutu = document.getElementById("dok");
+if (!ONIZLEME) {
+  for (const model of Object.keys(G.dok_secimi)) {
+    const sp = document.createElement("span");
+    sp.textContent = `${G.modeller[model].no} ${G.modeller[model].baslik}`;
+    const s = document.createElement("select");
+    for (const [d, dd] of Object.entries(G.doklar)) s.add(new Option(dd.ad, d, false, G.dok_secimi[model] === d));
+    s.onchange = () => {
+      const eski = G.dok_secimi[model], diger = Object.keys(G.dok_secimi).find(k => G.dok_secimi[k] === s.value);
+      if (diger) G.dok_secimi[diger] = eski;          // iki model ayni dokta olamaz: yer degistir
+      G.dok_secimi[model] = s.value;
+      sahayiKur();
+      dokKutu.querySelectorAll("select").forEach((e, i) => e.value = G.dok_secimi[Object.keys(G.dok_secimi)[i]]);
+    };
+    dokKutu.append(sp, s);
+  }
+}
+function sahayiKur() {
+  for (const k of Object.values(kokler)) sahne.remove(k.kok);
+  for (const k of Object.keys(kokler)) delete kokler[k];
+  yerlesim.length = 0;
+  yerlesim.push(...aktifYerlesim());
+  yerlesim.forEach(gorevKur);
+  etiketleriKur();
+  listeKur();
+}
+
+// ---- gorev numarasi etiketleri
+const etiketler = [];
+let etiketGoster = true;
+function etiketleriKur() {
+  etiketler.forEach(e => e.el.remove());
+  etiketler.length = 0;
+  if (ONIZLEME) return;
+  for (const y of yerlesim) {
+    const md = G.modeller[y.model];
+    const el = document.createElement("div");
+    el.className = "etiket";
+    el.textContent = md.no;
+    el.title = md.baslik;
+    document.body.appendChild(el);
+    const kutu = new THREE.Box3().setFromObject(kokler[y.ad].kok);
+    const p = kutu.getCenter(new THREE.Vector3());
+    p.y = kutu.max.y + 15;
+    etiketler.push({ el, p });
+  }
+}
+etiketleriKur();
+document.getElementById("etiketBtn").onclick = e => {
+  etiketGoster = !etiketGoster;
+  e.target.classList.toggle("secili", etiketGoster);
+};
+
+// ---- kamera
+let kameraModu = "genel";
+const kb = document.querySelectorAll("#kamera button[data-k]");
+function butonlar() { kb.forEach(b => b.classList.toggle("secili", b.dataset.k === kameraModu)); }
+function kameraAyarla(mod) {
+  kameraModu = mod; butonlar();
+  if (mod === "ust") {
+    kamera.position.set(MASA_W / 2, 2700, -MASA_H / 2 + 1);
+    kontrol.target.set(MASA_W / 2, 0, -MASA_H / 2);
+  } else if (mod === "genel") {
+    kamera.position.set(MASA_W / 2, 1500, 1150);
+    kontrol.target.set(MASA_W / 2, 0, -MASA_H / 2 + 50);
+  }
+}
+kb.forEach(b => b.onclick = () => kameraAyarla(b.dataset.k));
+if (!ONIZLEME) kameraAyarla(prm.get("kamera") || "genel");
+addEventListener("keydown", e => {
+  if (e.key === "1") kameraAyarla("ust");
+  else if (e.key === "2") kameraAyarla("genel");
+  else if (e.key === "3") kameraAyarla("serbest");
+  else if (e.key === "e" || e.key === "E") document.getElementById("etiketBtn").click();
+  else if (e.key === "Escape") { secili = null; listeKur(); }
+  else if (e.key === "t" || e.key === "T") sahayiKur();
+});
+addEventListener("resize", () => {
+  kamera.aspect = innerWidth / innerHeight;
+  kamera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const v = new THREE.Vector3();
+renderer.setAnimationLoop(() => {
+  kontrol.update();
+  renderer.render(sahne, kamera);
+  for (const e of etiketler) {
+    v.copy(e.p).project(kamera);
+    const gor = etiketGoster && v.z < 1;
+    e.el.style.display = gor ? "block" : "none";
+    if (gor) {
+      e.el.style.left = ((v.x + 1) / 2 * innerWidth) + "px";
+      e.el.style.top = ((1 - v.y) / 2 * innerHeight) + "px";
+    }
+  }
+});
+</script>
+</body>
+</html>
